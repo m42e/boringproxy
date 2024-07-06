@@ -9,9 +9,11 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+  "os/exec"
 	"net/http"
 	"sync"
 	"time"
+  "io"
 
 	"github.com/caddyserver/certmagic"
 	"golang.org/x/crypto/ssh"
@@ -30,6 +32,7 @@ type Client struct {
 	certConfig       *certmagic.Config
 	behindProxy      bool
 	pollInterval     int
+  proxyCommand     string
 }
 
 type ClientConfig struct {
@@ -44,6 +47,7 @@ type ClientConfig struct {
 	DnsServer      string `json:"dnsServer,omitempty"`
 	BehindProxy    bool   `json:"behindProxy,omitempty"`
 	PollInterval   int    `json:"pollInterval,omitempty"`
+	ProxyCommand   string `json:"proxyComman,omitempty"`
 }
 
 func NewClient(config *ClientConfig) (*Client, error) {
@@ -116,6 +120,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		certConfig:       certConfig,
 		behindProxy:      config.BehindProxy,
 		pollInterval:     config.PollInterval,
+		proxyCommand:     config.ProxyCommand,
 	}, nil
 }
 
@@ -277,107 +282,141 @@ func (c *Client) SyncTunnels(ctx context.Context, serverTunnels map[string]Tunne
 }
 
 func (c *Client) BoreTunnel(ctx context.Context, tunnel Tunnel) error {
+    log.Println("BoreTunnel", tunnel.Domain)
 
-	log.Println("BoreTunnel", tunnel.Domain)
+    signer, err := ssh.ParsePrivateKey([]byte(tunnel.TunnelPrivateKey))
+    if err != nil {
+        return fmt.Errorf("Unable to parse private key: %v", err)
+    }
 
-	signer, err := ssh.ParsePrivateKey([]byte(tunnel.TunnelPrivateKey))
-	if err != nil {
-		return fmt.Errorf("Unable to parse private key: %v", err)
-	}
+    config := &ssh.ClientConfig{
+        User: tunnel.Username,
+        Auth: []ssh.AuthMethod{
+            ssh.PublicKeys(signer),
+        },
+        HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+    }
 
-	//var hostKey ssh.PublicKey
+    sshHost := fmt.Sprintf("%s:%d", tunnel.ServerAddress, tunnel.ServerPort)
 
-	config := &ssh.ClientConfig{
-		User: tunnel.Username,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		//HostKeyCallback: ssh.FixedHostKey(hostKey),
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
+    var client *ssh.Client
+    if c.proxyCommand == "" {
+        // Use direct SSH connection
+        client, err = ssh.Dial("tcp", sshHost, config)
+        if err != nil {
+            return fmt.Errorf("Failed to dial: %v", err)
+        }
+    } else {
+      // Use SSH over proxy command
+        cmd := exec.CommandContext(ctx, "sh", "-c", c.proxyCommand)
+        stdin, err := cmd.StdinPipe()
+        if err != nil {
+            return fmt.Errorf("Failed to setup proxy command stdin: %v", err)
+        }
+        stdout, err := cmd.StdoutPipe()
+        if err != nil {
+            return fmt.Errorf("Failed to setup proxy command stdout: %v", err)
+        }
+        stderr, err := cmd.StderrPipe()
+        if err != nil {
+            return fmt.Errorf("Failed to setup proxy command stderr: %v", err)
+        }
+        err = cmd.Start()
+        if err != nil {
+            return fmt.Errorf("Failed to start proxy command: %v", err)
+        }
 
-	sshHost := fmt.Sprintf("%s:%d", tunnel.ServerAddress, tunnel.ServerPort)
-	client, err := ssh.Dial("tcp", sshHost, config)
-	if err != nil {
-		return fmt.Errorf("Failed to dial: %v", err)
-	}
-	defer client.Close()
+        // Create a full-duplex pipe pair
+        localConn, remoteConn := net.Pipe()
+        defer localConn.Close()
 
-	bindAddr := "127.0.0.1"
-	if tunnel.AllowExternalTcp {
-		bindAddr = "0.0.0.0"
-	}
-	tunnelAddr := fmt.Sprintf("%s:%d", bindAddr, tunnel.TunnelPort)
-	listener, err := client.Listen("tcp", tunnelAddr)
-	if err != nil {
-		return fmt.Errorf("Unable to register tcp forward for %s:%d %v", bindAddr, tunnel.TunnelPort, err)
-	}
-	defer listener.Close()
+        go func() {
+            defer remoteConn.Close()
+            io.Copy(remoteConn, stdout)
+        }()
+        go func() {
+            defer remoteConn.Close()
+            io.Copy(stdin, remoteConn)
+        }()
 
-	if tunnel.TlsTermination == "client" {
+        // Dial SSH over the proxy connection
+        clientConn, chans, reqs, err := ssh.NewClientConn(localConn, sshHost, config)
+        if err != nil {
+            return fmt.Errorf("Failed to create SSH client connection: %v", err)
+        }
+        client = ssh.NewClient(clientConn, chans, reqs)
 
-		tlsConfig := &tls.Config{
-			GetCertificate: c.certConfig.GetCertificate,
-			NextProtos:     []string{"h2", "acme-tls/1"},
-		}
-		tlsListener := tls.NewListener(listener, tlsConfig)
+        // Reading stderr to check for errors
+        go func() {
+            errOutput, _ := ioutil.ReadAll(stderr)
+            if len(errOutput) > 0 {
+                log.Printf("Proxy command stderr: %s", errOutput)
+            }
+        }()
+    }
 
-		httpMux := http.NewServeMux()
+    defer client.Close()
 
-		httpMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			proxyRequest(w, r, tunnel, c.httpClient, tunnel.ClientAddress, tunnel.ClientPort, c.behindProxy)
-		})
+    bindAddr := "127.0.0.1"
+    if tunnel.AllowExternalTcp {
+        bindAddr = "0.0.0.0"
+    }
+    tunnelAddr := fmt.Sprintf("%s:%d", bindAddr, tunnel.TunnelPort)
+    listener, err := client.Listen("tcp", tunnelAddr)
+    if err != nil {
+        return fmt.Errorf("Unable to register tcp forward for %s:%d %v", bindAddr, tunnel.TunnelPort, err)
+    }
+    defer listener.Close()
 
-		httpServer := &http.Server{
-			Handler: httpMux,
-		}
+    if tunnel.TlsTermination == "client" {
+        tlsConfig := &tls.Config{
+            GetCertificate: c.certConfig.GetCertificate,
+            NextProtos:     []string{"h2", "acme-tls/1"},
+        }
+        tlsListener := tls.NewListener(listener, tlsConfig)
 
-		// TODO: It seems inefficient to make a separate HTTP server for each TLS-passthrough tunnel,
-		// but the code is much simpler. The only alternative I've thought of so far involves storing
-		// all the tunnels in a mutexed map and retrieving them from a single HTTP server, same as the
-		// boringproxy server does.
-		go httpServer.Serve(tlsListener)
+        httpMux := http.NewServeMux()
 
-	} else {
+        httpMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+            proxyRequest(w, r, tunnel, c.httpClient, tunnel.ClientAddress, tunnel.ClientPort, c.behindProxy)
+        })
 
-		go func() {
-			for {
-				conn, err := listener.Accept()
-				if err != nil {
-					// TODO: Currently assuming an error means the
-					// tunnel was manually deleted, but there
-					// could be other errors that we should be
-					// attempting to recover from rather than
-					// breaking.
-					break
-					//continue
-				}
+        httpServer := &http.Server{
+            Handler: httpMux,
+        }
 
-				var useTls bool
-				if tunnel.TlsTermination == "client-tls" {
-					useTls = true
-				} else {
-					useTls = false
-				}
+        go httpServer.Serve(tlsListener)
+    } else {
+        go func() {
+            for {
+                conn, err := listener.Accept()
+                if err != nil {
+                    break
+                }
 
-				go ProxyTcp(conn, tunnel.ClientAddress, tunnel.ClientPort, useTls, c.certConfig)
-			}
-		}()
-	}
+                var useTls bool
+                if tunnel.TlsTermination == "client-tls" {
+                    useTls = true
+                } else {
+                    useTls = false
+                }
 
-	if tunnel.TlsTermination != "passthrough" {
-		// TODO: There's still quite a bit of duplication with what the server does. Could we
-		// encapsulate it into a type?
-		err = c.certConfig.ManageSync(ctx, []string{tunnel.Domain})
-		if err != nil {
-			log.Println("CertMagic error at startup")
-			log.Println(err)
-		}
-	}
+                go ProxyTcp(conn, tunnel.ClientAddress, tunnel.ClientPort, useTls, c.certConfig)
+            }
+        }()
+    }
 
-	<-ctx.Done()
+    if tunnel.TlsTermination != "passthrough" {
+        err = c.certConfig.ManageSync(ctx, []string{tunnel.Domain})
+        if err != nil {
+            log.Println("CertMagic error at startup")
+            log.Println(err)
+        }
+    }
 
-	return nil
+    <-ctx.Done()
+
+    return nil
 }
 
 func printJson(data interface{}) {
