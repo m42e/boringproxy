@@ -6,7 +6,7 @@ FROM ubuntu:16.04
 
 RUN apt-get update && apt-get install -y curl git inkscape
 
-RUN git clone https://github.com/boringproxy/boringproxy
+RUN git clone https://github.com/m42e/boringproxy
 WORKDIR boringproxy
 RUN ./scripts/install_go.sh
 ENV PATH="${PATH}:/usr/local/go/bin"

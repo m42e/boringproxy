@@ -1,4 +1,4 @@
-module github.com/boringproxy/boringproxy
+module github.com/m42e/boringproxy
 
 go 1.17
 

@@ -26,10 +26,10 @@ sudo chmod 700 /opt/boringproxy
 Download the boringproxy-server.service file
 ```bash
 # with wget
-wget https://raw.githubusercontent.com/boringproxy/boringproxy/master/systemd/boringproxy-server.service -O /tmp/boringproxy-server.service
+wget https://raw.githubusercontent.com/m42e/boringproxy/master/systemd/boringproxy-server.service -O /tmp/boringproxy-server.service
 
 # or with curl
-curl https://raw.githubusercontent.com/boringproxy/boringproxy/master/systemd/boringproxy-server.service --output /tmp/boringproxy-server.service
+curl https://raw.githubusercontent.com/m42e/boringproxy/master/systemd/boringproxy-server.service --output /tmp/boringproxy-server.service
 
 # move the systemd file into the correct location
 sudo mv /tmp/boringproxy-server.service /etc/systemd/system/boringproxy-server.service
@@ -52,10 +52,10 @@ This will make sure that boringproxy server will always start backup if the host
 Download the boringproxy-client@.service file
 ```bash
 # with wget
-wget https://raw.githubusercontent.com/boringproxy/boringproxy/master/systemd/boringproxy-client.service -O "/tmp/boringproxy-client@.service"
+wget https://raw.githubusercontent.com/m42e/boringproxy/master/systemd/boringproxy-client.service -O "/tmp/boringproxy-client@.service"
 
 # or with curl
-curl https://raw.githubusercontent.com/boringproxy/boringproxy/master/systemd/boringproxy-client.service --output "/tmp/boringproxy-client@.service"
+curl https://raw.githubusercontent.com/m42e/boringproxy/master/systemd/boringproxy-client.service --output "/tmp/boringproxy-client@.service"
 
 sudo mv /tmp/boringproxy-client@.service /etc/systemd/system/boringproxy-client@.service
 ```
@@ -77,8 +77,8 @@ This will make sure that boringproxy client will always start backup and reconne
 If you have already ran the admin server you will need to migrate the db and change its permissions to keep your existing settings.
 
 ```bash
-sudo mv /root/boringproxy_db.json /opt/boringproxy/boringproxy_db.json
-sudo chown boringproxy:boringproxy /opt/boringproxy/boringproxy_db.json
+sudo mv /root/boringproxy_db.json /opt/m42e/boringproxy_db.json
+sudo chown boringproxy:boringproxy /opt/m42e/boringproxy_db.json
 ```
 
 ### Client Service Unit File

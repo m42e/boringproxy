@@ -6,4 +6,4 @@ Docs
 
 [Usage](https://boringproxy.io/usage/)
 
-[Systemd setup](https://github.com/boringproxy/boringproxy/blob/master/docs/systemd.md)
+[Systemd setup](https://github.com/m42e/boringproxy/blob/master/docs/systemd.md)

@@ -5,7 +5,7 @@ ARG VERSION
 ARG GOOS="linux"
 ARG GOARCH="amd64"
 ARG BRANCH="master"
-ARG REPO="https://github.com/boringproxy/boringproxy.git"
+ARG REPO="https://github.com/m42e/boringproxy.git"
 ARG ORIGIN='local'
 
 WORKDIR /build
@@ -26,7 +26,7 @@ FROM scratch
 EXPOSE 80 443
 WORKDIR /storage
 
-COPY --from=builder /build/cmd/boringproxy/boringproxy /
+COPY --from=builder /build/cmd/m42e/boringproxy /
 
 ENTRYPOINT ["/boringproxy"]
 CMD ["version"]

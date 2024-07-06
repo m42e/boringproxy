@@ -29,7 +29,7 @@ in this README is just for building from source.
 # Building
 
 ```bash
-git clone https://github.com/boringproxy/boringproxy
+git clone https://github.com/m42e/boringproxy
 ```
 
 ```bash
@@ -85,4 +85,4 @@ sudo setcap cap_net_bind_service=+ep boringproxy
 
 [1]: https://forum.indiebits.io/c/boringproxy-support/9
 
-[2]: https://github.com/boringproxy/boringproxy/issues
+[2]: https://github.com/m42e/boringproxy/issues

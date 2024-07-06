@@ -50,7 +50,7 @@ Installing the service on a boringproxy server
 
 Copy service file from GitHub
 ```bash
-wget https://raw.githubusercontent.com/boringproxy/boringproxy/master/systemd/boringproxy-server.service
+wget https://raw.githubusercontent.com/m42e/boringproxy/master/systemd/boringproxy-server.service
 ```
 
 ### Edit service file to include your setup information
@@ -147,7 +147,7 @@ Installing the service on a boringproxy client
 
 Copy service file from GitHub
 ```bash
-wget https://raw.githubusercontent.com/boringproxy/boringproxy/master/systemd/boringproxy-client.service
+wget https://raw.githubusercontent.com/m42e/boringproxy/master/systemd/boringproxy-client.service
 ```
 
 ### Edit service file to include your setup information
