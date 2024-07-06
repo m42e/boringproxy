@@ -12,6 +12,7 @@ import (
   "os/exec"
 	"net/http"
 	"sync"
+  "strings"
 	"time"
   "io"
 
@@ -308,7 +309,10 @@ func (c *Client) BoreTunnel(ctx context.Context, tunnel Tunnel) error {
         }
     } else {
       // Use SSH over proxy command
-        cmd := exec.CommandContext(ctx, "sh", "-c", c.proxyCommand)
+        tmpProxyCommand := strings.Replace(c.proxyCommand, "%h", tunnel.ServerAddress, -1)
+        proxyCommand := strings.Replace(tmpProxyCommand, "%p", fmt.Sprintf("%d", tunnel.ServerPort), -1)
+
+        cmd := exec.CommandContext(ctx, "sh", "-c", proxyCommand)
         stdin, err := cmd.StdinPipe()
         if err != nil {
             return fmt.Errorf("Failed to setup proxy command stdin: %v", err)
