@@ -1,11 +1,13 @@
 package boringproxy
 
 import (
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"time"
+    "fmt"
+    "io"
+    "net"
+    "net/http"
+    "time"
+
+    "github.com/gorilla/websocket"
 )
 
 func proxyRequest(w http.ResponseWriter, r *http.Request, tunnel Tunnel, httpClient *http.Client, address string, port int, behindProxy bool) {
@@ -105,6 +107,53 @@ func proxyRequest(w http.ResponseWriter, r *http.Request, tunnel Tunnel, httpCli
 
 	w.WriteHeader(upstreamRes.StatusCode)
 	io.Copy(w, upstreamRes.Body)
+}
+
+func isWebSocket(r *http.Request) bool {
+    return websocket.IsWebSocketUpgrade(r)
+}
+
+func handleWebSocket(w http.ResponseWriter, r *http.Request, address string, port int) {
+    var upgrader = websocket.Upgrader{
+        CheckOrigin: func(r *http.Request) bool {
+            return true
+        },
+    }
+
+    upstreamAddr := fmt.Sprintf("%s:%d", address, port)
+    upstreamConn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://%s%s", upstreamAddr, r.URL.RequestURI()), r.Header)
+    if err != nil {
+        http.Error(w, "Error contacting backend http.Status server.",http.StatusInternalServerError)
+        return
+    }
+    defer upstreamConn.Close()
+
+    downstreamConn, err := upgrader.Upgrade(w, r, nil)
+    if err != nil {
+        http.Error(w, "Error upgrading connection.", http.StatusInternalServerError)
+        return
+    }
+    defer downstreamConn.Close()
+
+    errorChan := make(chan error, 2)
+
+    go copyWebSocket(upstreamConn, downstreamConn, errorChan)
+    go copyWebSocket(downstreamConn, upstreamConn, errorChan)
+    <-errorChan
+}
+
+func copyWebSocket(dst, src *websocket.Conn, errorChan chan error) {
+    for {
+        messageType, p, err := src.ReadMessage()
+        if err != nil {
+            errorChan <- err
+            return
+        }
+        if err := dst.WriteMessage(messageType, p); err != nil {
+            errorChan <- err
+            return
+        }
+    }
 }
 
 // Need to strip out headers that shouldn't be forwarded from HTTP/1.1 to

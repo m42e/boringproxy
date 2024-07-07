@@ -361,6 +361,30 @@ func (c *Client) BoreTunnel(ctx context.Context, tunnel Tunnel) error {
 
     defer client.Close()
 
+    // Set up a ticker to send keep-alive messages
+    interval := 5 * time.Second  // ServerAliveInterval
+    maxCount := 2                  // ServerAliveCountMax
+    ticker := time.NewTicker(interval)
+
+    go func() {
+        count := 0
+        defer ticker.Stop()
+
+        for range ticker.C {
+            if _, _, err := client.SendRequest("keepalive@openssh.com", false, nil); err != nil {
+                log.Printf("Keep-alive error: %v", err)
+                count++
+                if count >= maxCount {
+                    log.Println("Max keep-alive attempts reached, closing connection")
+                    client.Close()
+                    break
+                }
+            } else {
+                count = 0
+            }
+        }
+    }()
+
     bindAddr := "127.0.0.1"
     if tunnel.AllowExternalTcp {
         bindAddr = "0.0.0.0"
